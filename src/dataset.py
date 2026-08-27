@@ -135,9 +135,9 @@ class SpeechCNN(nn.Module):
         x = self.block3(x)
         return self.classifier(x)                 # 结尾不加 softmax！CrossEntropyLoss 自带
 
-# 测试代码
-if __name__ == "__main__":
-    net = SpeechCNN()
-    print("total params:", sum(p.numel() for p in net.parameters()))  # numel = 参数个数，sum 汇总全部层
-    out = net(torch.randn(2, 1, 64, 128))  # randn = 造 2 条随机假数据，只为看输出形状
-    print("output shape:", out.shape)  # 预期 torch.Size([2, 8])
+# # 测试代码
+# if __name__ == "__main__":
+#     net = SpeechCNN()
+#     print("total params:", sum(p.numel() for p in net.parameters()))  # numel = 参数个数，sum 汇总全部层
+#     out = net(torch.randn(2, 1, 64, 128))  # randn = 造 2 条随机假数据，只为看输出形状
+#     print("output shape:", out.shape)  # 预期 torch.Size([2, 8])
