@@ -1,0 +1,73 @@
+import glob
+import random
+
+import torch
+import torchaudio                      # torchaudio.load()：读音频文件用
+import torchaudio.transforms as T      # transforms = 音频变换工具箱，Mel 频谱在这里
+from torch.utils.data import Dataset, DataLoader
+
+# 前置修复：RAVDESS 原生 48 kHz → 降到语音标准 16 kHz
+# （MelSpectrogram 的 sample_rate 参数只定频率刻度、不重采样音频，必须手动降，
+#   否则频率错位 3 倍、hop=125 每秒产生 384 帧 → 128 帧只剩 0.33 秒语音）
+resample = T.Resample(orig_freq=48000, new_freq=16000)   # 48kHz → 16kHz
+
+# 功能：波形→Mel 频谱 | 参数注释：名称 / 含义 / 默认 / 调整指导
+melspec = T.MelSpectrogram(
+    sample_rate=16000,   # 采样率 / 与重采样后的波形一致 / 固定 16000 / 勿动
+    n_fft=1024,          # FFT 窗长 / 1024/16000=64ms，频率分辨率≈15.6Hz / 默认 400 / 勿动
+    hop_length=125,      # 帧移 / 每秒帧数=16000/125=128 帧 / 与目标 128 帧匹配 / 勿动
+    n_mels=64,           # Mel 频带数 / 输入"图像"的高度 / 默认 64 / 32~128 皆可
+)
+
+def wav_to_logmel(wav, target_frames=128):
+    # 修复1：数据里有 5 条立体声文件 → 双声道取平均合成单声道（否则拼不进 batch）
+    if wav.shape[0] > 1:
+        wav = wav.mean(dim=0, keepdim=True)   # dim=0 是声道维；keepdim 让形状保持 [1,T]
+    # 修复2：48kHz → 16kHz（关键一行：不降采样则下面所有参数的解释错位 3 倍）
+    wav = resample(wav)
+    mel = melspec(wav)                    # ① 波形[1,T] → Mel 频谱 [1, 64, T]，T 随语音长度变化
+    mel = torch.log(mel + 1e-6)           # ② log 压缩（+1e-6 防止 log(0) 报错）
+    # ③ 固定长度：太长 → 中心裁剪；太短 → 右侧补零（CNN 要求所有输入同尺寸）
+    n_frames = mel.shape[2]               # 当前时间帧数（shape 的第 3 个数）
+    if n_frames > target_frames:
+        start = (n_frames - target_frames) // 2   # 从中间开始裁，保留语音主体
+        mel = mel[:, :, start:start + target_frames]
+    elif n_frames < target_frames:
+        pad = target_frames - n_frames             # 缺多少帧
+        mel = torch.nn.functional.pad(mel, (0, pad))  # (0,pad) = 只在最后一维（时间）右侧补零
+    return mel                            # [1, 64, 128]
+
+class RavdessDataset(Dataset):
+    # 把 [(文件路径, 情感标签int), ...] 列表包装成 PyTorch 认识的数据集
+    def __init__(self, file_list):
+        self.file_list = file_list        # 原样保存，供下面两个方法用
+    def __len__(self):
+        return len(self.file_list)        # 样本总数 = 列表长度
+    def __getitem__(self, idx):
+        path, label = self.file_list[idx]            # 取第 idx 条 (路径, 标签)
+        wav, sr = torchaudio.load(path)              # 读音频 → (波形[1,T], 采样率)
+        logmel = wav_to_logmel(wav)                  # Step 2 的函数 → [1,64,128]
+        return logmel, torch.tensor(label, dtype=torch.int64)  # 标签必须 int64
+
+def make_loaders(batch_size=32, seed=42):
+    # 组装文件清单 → 固定种子打乱 → 切 80/20 → 两个 DataLoader
+    # train.py 也 import 这个函数，保证训练和验收用的是同一份数据划分（可复现）
+    files = glob.glob("data/**/*.wav", recursive=True)      # 递归列出全部 wav
+    pairs = [(f, int(f.split("-")[2]) - 1) for f in files]  # 文件名第3段=情感编码01~08 → 标签0~7
+    random.Random(seed).shuffle(pairs)               # 固定种子 42 → 每次运行划分一致
+    cut = int(len(pairs) * 0.8)                      # 80% 处切一刀
+    train_ds = RavdessDataset(pairs[:cut])           # 前 80% 训练
+    test_ds = RavdessDataset(pairs[cut:])            # 后 20% 测试
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)  # 训练要打乱
+    test_loader = DataLoader(test_ds, batch_size=batch_size)   # 测试不用打乱
+    return train_loader, test_loader
+
+if __name__ == "__main__":
+    # 验收测试（Step 3）：直接运行本文件才执行；被 train.py import 时自动跳过
+    train_loader, test_loader = make_loaders()
+    x, y = next(iter(train_loader))       # 取出一个 batch（32 条）
+    print("x.shape:", x.shape)            # 预期 torch.Size([32, 1, 64, 128])
+    print("y.shape:", y.shape)            # 预期 torch.Size([32])
+    print("y dtype:", y.dtype)            # 预期 torch.int64
+    print("train size:", len(train_loader.dataset))  # 预期 1152（=1440×0.8）
+    print("test size:", len(test_loader.dataset))    # 预期 288
