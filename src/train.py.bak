@@ -1,11 +1,12 @@
-# ============ train.py 开头的 import 区（缺一个都 NameError）============
+# ============ train.py：只管训练（Step 5）============
+# 职责：跑 40 轮训练 → 产出两个文件（下游各读各的，互不干扰）：
+#   speech_cnn.pth  = 模型参数（evaluate.py 读）
+#   history.json    = 40 轮曲线数据（plot.py 读）
+import json                              # JSON = 通用文本数据格式；json 是 Python 自带库，无需安装
 import torch
 import torch.nn as nn
 from model import SpeechCNN              # Step 4 写的模型类
-from dataset import make_loaders         # Step 3 封装的数据划分函数
-import matplotlib
-matplotlib.use("Agg")                    # WSL 无图形界面，用 Agg 后端（只能存文件不能弹窗）
-import matplotlib.pyplot as plt
+from dataset import make_loaders         # Step 3 封装好的数据划分 → 两个 loader
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("device:", device)                                # 预期 cuda（4080）
@@ -13,10 +14,10 @@ train_loader, test_loader = make_loaders(batch_size=32) # 组装数据（与验�
 net = SpeechCNN().to(device)                            # 模型搬到 GPU
 criterion = nn.CrossEntropyLoss()                       # 式(2)：目标函数
 optimizer = torch.optim.Adam(net.parameters(), lr=1e-3) # 式(10)：更新规则
-history = {"train_loss": [], "train_acc": [], "test_acc": []}  # Step 6 画图的数据源
+history = {"train_loss": [], "train_acc": [], "test_acc": []}  # 曲线数据源，训练完存成 history.json
 
 def evaluate(net, loader):
-    # 遍历一遍 loader 算正确率：eval 模式 + no_grad（不算梯度 → 省显存提速）
+    # 遍历一遍 loader 算正确率：eval 模式 + no_grad 不算梯度（省显存提速）
     net.eval()
     correct, total = 0, 0
     with torch.no_grad():
@@ -40,46 +41,18 @@ for epoch in range(40):                    # epoch: 30~60，看曲线定
         optimizer.step()                   # ⑤ 更新参数
         loss_sum += loss.item(); n_batches += 1  # .item() = 从张量里取出普通数字
     avg_loss = loss_sum / n_batches        # 本 epoch 训练损失
-    train_acc = evaluate(net, train_loader)   # 训练集正确率
-    test_acc = evaluate(net, test_loader)     # 测试集正确率
-    history["train_loss"].append(avg_loss)    # 三个数记进 history，Step 6 画图用
+    train_acc = evaluate(net, train_loader)   # 训练集正确率（仪表盘监控）
+    test_acc = evaluate(net, test_loader)     # 测试集正确率（仪表盘监控；正式终评在 evaluate.py）
+    history["train_loss"].append(avg_loss)
     history["train_acc"].append(train_acc)
     history["test_acc"].append(test_acc)
     print(f"epoch {epoch}  train_loss={avg_loss:.4f}  train_acc={train_acc:.4f}  test_acc={test_acc:.4f}")
 
-# ============ Step 6：收敛曲线（任务 (3) 的指定交付物）============
-# 图 A：训练损失曲线（收敛性的直接证据）
-plt.figure(figsize=(7, 4))
-plt.plot(history["train_loss"])            # 每 epoch 一个点（x 轴自动为 0,1,2,…）
-plt.xlabel("Epoch"); plt.ylabel("Cross-Entropy Loss")
-plt.title("Training Loss Convergence")
-plt.savefig("loss.png", dpi=150, bbox_inches="tight")
+# ============ 存盘：训练成果落袋为安（两个文件，下游 plot/evaluate 各读各的）============
+torch.save(net.state_dict(), "speech_cnn.pth")
+# save = 存盘 / state_dict = 107 万个参数值打包成的字典 / .pth = PyTorch 模型文件习惯后缀
+print("saved: speech_cnn.pth")             # 跑完可用 ls -lh speech_cnn.pth 核对（约 4 MB）
 
-# 图 B：训练/测试准确率双曲线（有效性的直接证据）
-plt.figure(figsize=(7, 4))
-plt.plot(history["train_acc"], label="train acc")   # 两条线各起个名
-plt.plot(history["test_acc"], label="test acc")
-plt.xlabel("Epoch"); plt.ylabel("Accuracy")
-plt.title("Accuracy Convergence")
-plt.legend()                              # 图例：把 label 显示出来，区分两条线
-plt.savefig("acc.png", dpi=150, bbox_inches="tight")
-print("saved: loss.png / acc.png")
-
-# ============ Step 7：测试集最终评估 + 混淆矩阵 ============
-net.eval()                                # 切到评估模式（关 dropout 等）
-correct, total = 0, 0
-y_true, y_pred = [], []                   # 两个空列表：边跑边收，混淆矩阵要用
-with torch.no_grad():                     # 不建计算图，省显存提速
-    for x, y in test_loader:
-        x, y = x.to(device), y.to(device)
-        pred = net(x).argmax(dim=1)       # 每行取最大值下标 = 预测类别
-        correct += (pred == y).sum().item()
-        total += len(y)
-        y_true += y.cpu().tolist()        # .cpu() 搬回内存 → .tolist() 转普通列表
-        y_pred += pred.cpu().tolist()     # sklearn 不认 GPU 张量，必须转成 Python 数字
-print(f"test accuracy = {correct/total:.4f}")   # 预期 0.60~0.75（随机基线 0.125）
-
-from sklearn.metrics import ConfusionMatrixDisplay
-ConfusionMatrixDisplay.from_predictions(y_true, y_pred)
-plt.savefig("fig_confusion.png", dpi=150, bbox_inches="tight")
-print("saved: fig_confusion.png")
+with open("history.json", "w") as f:       # "w" = 写模式（write）；相对路径 → 落在 ~/cnn-speech/
+    json.dump(history, f)                  # dump = 把字典写成 JSON 文本（几 KB，肉眼可读）
+print("saved: history.json")               # plot.py 的唯一输入；cat history.json 可直接看数字

@@ -6,7 +6,6 @@ import torchaudio                      # torchaudio.load()：读音频文件用
 import torchaudio.transforms as T      # transforms = 音频变换工具箱，Mel 频谱在这里
 from torch.utils.data import Dataset, DataLoader
 
-import torch.nn as nn
 
 # 前置修复：RAVDESS 原生 48 kHz → 降到语音标准 16 kHz
 # （MelSpectrogram 的 sample_rate 参数只定频率刻度、不重采样音频，必须手动降，
@@ -102,41 +101,9 @@ def make_loaders(batch_size=32, seed=42):
 #     print("y dtype:", y.dtype)      # 预期 torch.int64（dtype = data type，张量里数字的类型）
 #     print("train size:", len(train_loader.dataset))  # 预期 1152（=1440×0.8，1440 条语音的 80%）
 #     print("test size:", len(test_loader.dataset))    # 预期 288（后 20%）
-class SpeechCNN(nn.Module):
-    def __init__(self, n_classes=8):
-        super().__init__()
-        # 三个卷积块：Conv2d(1→16→32→64, 3×3, padding=1) + ReLU + MaxPool2d(2)
-        self.block1 = nn.Sequential(              # 输入 [N, 1, 64, 128]
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),   # → [N, 16, 64, 128]
-            nn.ReLU(),
-            nn.MaxPool2d(2),                     # → [N, 16, 32, 64] 高宽减半
-        )
-        self.block2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),  # → [N, 32, 32, 64]
-            nn.ReLU(),
-            nn.MaxPool2d(2),                     # → [N, 32, 16, 32]
-        )
-        self.block3 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),  # → [N, 64, 16, 32]
-            nn.ReLU(),
-            nn.MaxPool2d(2),                     # → [N, 64, 8, 16] 三连减半后 64×8×16
-        )
-        # 分类头：Flatten → Linear(64*8*16 → 128) + ReLU → Linear(128 → n_classes)
-        self.classifier = nn.Sequential(
-            nn.Flatten(),                         # → [N, 8192]（= 64×8×16）
-            nn.Linear(64 * 8 * 16, 128),          # → [N, 128]（参数量大头：104.9 万）
-            nn.ReLU(),
-            nn.Linear(128, n_classes),            # → [N, 8] logits
-        )
-    def forward(self, x):
-        # x: [N, 1, 64, 128] → 依次过三个卷积块 → 分类头 → 返回 logits [N, 8]
-        x = self.block1(x)
-        x = self.block2(x)
-        x = self.block3(x)
-        return self.classifier(x)                 # 结尾不加 softmax！CrossEntropyLoss 自带
-
 # # 测试代码
 # if __name__ == "__main__":
+#     from model import SpeechCNN     # 模型已搬到 model.py，测试时从这里导入
 #     net = SpeechCNN()
 #     print("total params:", sum(p.numel() for p in net.parameters()))  # numel = 参数个数，sum 汇总全部层
 #     out = net(torch.randn(2, 1, 64, 128))  # randn = 造 2 条随机假数据，只为看输出形状

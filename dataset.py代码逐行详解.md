@@ -1,4 +1,4 @@
-# dataset.py 代码逐行详解（对应 src/dataset.py，共 143 行）
+# dataset.py 代码逐行详解（对应 src/dataset.py，共 110 行）
 
 ---
 
@@ -68,7 +68,7 @@ import matplotlib.pyplot as plt  # matplotlib.pyplot 缩写为 plt
 
 ## 二、代码逐行详解
 
-### 2.1 导入部分（第 1-9 行）
+### 2.1 导入部分（第 1-7 行）
 
 ```python
 import glob
@@ -78,18 +78,16 @@ import torch
 import torchaudio                      # torchaudio.load()：读音频文件用
 import torchaudio.transforms as T      # transforms = 音频变换工具箱，Mel 频谱在这里
 from torch.utils.data import Dataset, DataLoader
-
-import torch.nn as nn
 ```
 
 #### 第 1 行：`import glob`
 - **模块**：`glob` 是 Python 标准库，用于按通配符匹配文件路径
-- **用途**：第 85 行用 `glob.glob("data/**/*.wav")` 找出所有 `.wav` 文件
+- **用途**：第 84 行用 `glob.glob("data/**/*.wav")` 找出所有 `.wav` 文件
 - **类比**：在文件管理器里搜索 `*.wav`
 
 #### 第 2 行：`import random`
 - **模块**：`random` 是标准库，提供随机数生成功能
-- **用途**：第 87 行用 `random.Random(seed).shuffle(pairs)` 固定种子打乱数据
+- **用途**：第 86 行用 `random.Random(seed).shuffle(pairs)` 固定种子打乱数据
 
 #### 第 4 行：`import torch`
 - **库**：PyTorch 核心库（本项目的深度学习框架）
@@ -98,7 +96,7 @@ import torch.nn as nn
 
 #### 第 5 行：`import torchaudio`
 - **库**：PyTorch 官方的音频处理库
-- **用途**：第 78 行用 `torchaudio.load(path)` 读取 `.wav` 文件
+- **用途**：第 77 行用 `torchaudio.load(path)` 读取 `.wav` 文件
 - **返回值**：`(波形张量 [channels, samples], 采样率)`
 
 #### 第 6 行：`import torchaudio.transforms as T`
@@ -107,17 +105,14 @@ import torch.nn as nn
 - **为什么用别名**：`torchaudio.transforms` 路径很长，`T` 简洁好记
 
 #### 第 7 行：`from torch.utils.data import Dataset, DataLoader`
-- **`Dataset`**：PyTorch 数据集的**基类**，第 70 行用它来创建自定义 `RavdessDataset`
+- **`Dataset`**：PyTorch 数据集的**基类**，第 69 行用它来创建自定义 `RavdessDataset`
 - **`DataLoader`**：数据加载器，自动将数据打包成批次、支持打乱
 - **为什么用 `from` 而不用 `import torch.utils.data`**：因为后面频繁使用 `Dataset` 和 `DataLoader`，直接写名字更方便
-
-#### 第 9 行：`import torch.nn as nn`
-- **用途**：给文件末尾（第 105 行起）的 `SpeechCNN` 提供 `nn.Module`、`nn.Sequential`、`nn.Conv2d` 等神经网络组件
-- `as nn` 是 PyTorch 社区的通用别名
+- 模型类 `SpeechCNN` 已搬到 model.py，本文件不再需要 `import torch.nn as nn`
 
 ---
 
-### 2.2 音频重采样 + Mel 频谱变换器（第 11-22 行）
+### 2.2 音频重采样 + Mel 频谱变换器（第 10-21 行）
 
 ```python
 # 前置修复：RAVDESS 原生 48 kHz → 降到语音标准 16 kHz
@@ -134,14 +129,14 @@ melspec = T.MelSpectrogram(
 )
 ```
 
-#### `resample` 重采样器（第 14 行）
+#### `resample` 重采样器（第 13 行）
 - `T.Resample(orig_freq=48000, new_freq=16000)`：创建一个**采样率转换器**
 - **作用**：把 RAVDESS 原生 48kHz 音频降到语音标准 16kHz
 - **为什么必须手动降？** `MelSpectrogram` 的 `sample_rate` 参数**只定频率刻度，不会自动重采样**音频。若不手动降到 16kHz：
   - 频谱按 16kHz 刻度解读 48kHz 的数据 → 频率错位 3 倍
   - `hop=125` 在 16kHz 下是每秒 128 帧，但原始 48kHz 下每秒产生 384 帧 → 截取 128 帧只剩 0.33 秒语音
 
-#### `melspec` Mel 频谱变换器（第 17-22 行）
+#### `melspec` Mel 频谱变换器（第 16-21 行）
 
 | 参数 | 值 | 含义 |
 |---|---|---|
@@ -155,7 +150,7 @@ melspec = T.MelSpectrogram(
 
 ---
 
-### 2.3 核心函数 `wav_to_logmel`（第 22-38 行）
+### 2.3 核心函数 `wav_to_logmel`（第 23-39 行）
 
 ```python
 def wav_to_logmel(wav, target_frames=128):
@@ -174,12 +169,12 @@ def wav_to_logmel(wav, target_frames=128):
         wav = wav.mean(dim=0, keepdim=True)   # dim=0 是声道维；keepdim 让形状保持 [1,T]
 ```
 
-#### 第 24 行：检查声道数
+#### 第 25 行：检查声道数
 - `wav.shape[0]` 是第 0 维的大小（声道数）
 - RAVDESS 大部分是单声道（`shape[0]=1`），少数是立体声（`shape[0]=2`）
 - 条件 `> 1` 表示如果是立体声就转换
 
-#### 第 25 行：立体声→单声道
+#### 第 26 行：立体声→单声道
 - `wav.mean(dim=0)`：在第 0 维（声道维）上取平均
 - `keepdim=True`：保持维度不压缩，`[2,T]` → `[1,T]` 而不是 `[T]`
 - **为什么要单声道**：CNN 要求 batch 中所有张量形状一致，多声道会导致 `[2,64,128]` 和 `[1,64,128]` 无法拼接
@@ -191,8 +186,8 @@ def wav_to_logmel(wav, target_frames=128):
     wav = resample(wav)
 ```
 
-#### 第 27 行：重采样到 16kHz
-- 调用第 12 行创建的 `resample` 转换器
+#### 第 28 行：重采样到 16kHz
+- 调用第 13 行创建的 `resample` 转换器
 - 把读进来的波形从 48kHz 降到 16kHz（关键步骤，缺它会频率错位 3 倍）
 - 关于为什么必须降，见 2.2 节"新增：`resample` 重采样器"
 
@@ -202,8 +197,8 @@ def wav_to_logmel(wav, target_frames=128):
     mel = melspec(wav)                    # ① 波形[1,T] → Mel 频谱 [1, 64, T]，T 随语音长度变化
 ```
 
-#### 第 30 行：Mel 变换
-- 调用第 17 行创建的 `melspec` 对象
+#### 第 29 行：Mel 变换
+- 调用第 16 行创建的 `melspec` 对象
 - 输入：`[1, T]`（单声道波形，T 是采样点数）
 - 输出：`[1, 64, T']`（Mel 频谱，T' 是时间帧数，取决于 `hop_length`）
 - **形状变化**：采样点数 → 时间帧数，这是一种"降采样"
@@ -214,7 +209,7 @@ def wav_to_logmel(wav, target_frames=128):
     mel = torch.log(mel + 1e-6)           # ② log 压缩（+1e-6 防止 log(0) 报错）
 ```
 
-#### 第 31 行：对数压缩
+#### 第 30 行：对数压缩
 - **为什么要 log**：音频能量跨度极大（从极静到极响），log 压缩后更适合 CNN 学习
 - **`+1e-6` 的作用**：防止 `log(0)` 产生负无穷（数值稳定性处理）
 
@@ -225,7 +220,7 @@ def wav_to_logmel(wav, target_frames=128):
     n_frames = mel.shape[2]               # 当前时间帧数（shape 的第 3 个数）
 ```
 
-#### 第 31 行：获取当前帧数
+#### 第 32 行：获取当前帧数
 - `mel.shape` 是 `[1, 64, T']`，`shape[2]` 取时间帧数 `T'`
 - 不同语音的 `T'` 不同，需要统一到 128 帧
 
@@ -237,7 +232,7 @@ def wav_to_logmel(wav, target_frames=128):
         mel = mel[:, :, start:start + target_frames]
 ```
 
-#### 第 34-36 行：长语音裁剪
+#### 第 33-35 行：长语音裁剪
 - 条件：当前帧数 > 128（语音太长）
 - `start`：裁剪起点，`(n_frames - 128) // 2` 即从中间开始
 - `mel[:, :, start:start+128]`：在时间轴上截取 128 帧，保留中间部分
@@ -252,7 +247,7 @@ def wav_to_logmel(wav, target_frames=128):
     return mel                            # [1, 64, 128]
 ```
 
-#### 第 35-37 行：短语音补零
+#### 第 36-39 行：短语音补零
 - 条件：当前帧数 < 128（语音太短）
 - `pad`：需要补多少帧
 - `torch.nn.functional.pad(mel, (0, pad))`：在最后一维（时间轴）右侧补 `pad` 个零
@@ -261,43 +256,43 @@ def wav_to_logmel(wav, target_frames=128):
 
 ---
 
-### 2.4 自定义 Dataset 类（第 70-80 行）
+### 2.4 自定义 Dataset 类（第 69-79 行）
 
 ```python
 class RavdessDataset(Dataset):
-    # 把 [(文件路径, 情感标签int), ...] 列表包装成 PyTorch 认识的数据集
     def __init__(self, file_list):
-        self.file_list = file_list        # 原样保存，供下面两个方法用
+        # file_list: [(路径, 情感标签int), ...]，由你在 glob + 文件名解析后传入
+        self.file_list = file_list    # 原样保存，供下面两个方法用
     def __len__(self):
-        return len(self.file_list)        # 样本总数 = 列表长度
+        return len(self.file_list)    # 样本总数 = 列表长度
     def __getitem__(self, idx):
-        path, label = self.file_list[idx]            # 取第 idx 条 (路径, 标签)
-        wav, sr = torchaudio.load(path)              # 读音频 → (波形[1,T], 采样率)
-        logmel = wav_to_logmel(wav)                  # Step 2 的函数 → [1,64,128]
+        path, label = self.file_list[idx]          # 取第 idx 条 (路径, 标签)
+        wav, sr = torchaudio.load(path)            # 读音频 → (波形[1,T], 采样率)
+        logmel = wav_to_logmel(wav)                # Step 2 的函数 → [1,64,128]
         return logmel, torch.tensor(label, dtype=torch.int64)  # 标签必须 int64
 ```
 
-#### 第 70 行：继承 `Dataset`
+#### 第 69 行：继承 `Dataset`
 - `RavdessDataset(Dataset)` 表示继承 PyTorch 的 `Dataset` 基类
 - 必须实现 `__init__`、`__len__`、`__getitem__` 三个方法
 
-#### 第 71-73 行：`__init__` 初始化
+#### 第 70-72 行：`__init__` 初始化
 - 接收文件列表 `[(路径, 标签), ...]`
 - 保存到 `self.file_list`，供后续方法使用
 
-#### 第 74-75 行：`__len__` 长度
+#### 第 73-74 行：`__len__` 长度
 - 返回数据集样本总数
 - `DataLoader` 需要知道数据集大小才能工作
 
-#### 第 76-80 行：`__getitem__` 取单个样本
+#### 第 75-79 行：`__getitem__` 取单个样本
 - 接收索引 `idx`，返回 `(频谱图, 标签)`
-- 第 78 行 `torchaudio.load(path)`：读取 `.wav` 文件
-- 第 79 行 `wav_to_logmel(wav)`：波形转频谱图
-- 第 80 行：标签转为 `int64` 张量（PyTorch 损失函数要求 `int64`）
+- 第 77 行 `torchaudio.load(path)`：读取 `.wav` 文件
+- 第 78 行 `wav_to_logmel(wav)`：波形转频谱图
+- 第 79 行：标签转为 `int64` 张量（PyTorch 损失函数要求 `int64`）
 
 ---
 
-### 2.5 数据划分函数 `make_loaders`（第 84-93 行）
+### 2.5 数据划分函数 `make_loaders`（第 83-92 行）
 
 ```python
 def make_loaders(batch_size=32, seed=42):
@@ -315,7 +310,7 @@ def make_loaders(batch_size=32, seed=42):
     files = glob.glob("data/**/*.wav", recursive=True)      # 递归列出全部 wav
 ```
 
-#### 第 85 行：查找所有 `.wav` 文件
+#### 第 84 行：查找所有 `.wav` 文件
 - `"data/**/*.wav"`：`**` 表示任意层级子目录
 - `recursive=True`：启用递归搜索
 - 返回：1440 个文件路径的列表
@@ -327,7 +322,7 @@ def make_loaders(batch_size=32, seed=42):
     pairs = [(f, int(f.split("-")[2]) - 1) for f in files]  # 文件名第3段=情感编码01~08 → 标签0~7
 ```
 
-#### 第 86 行：解析情感标签
+#### 第 85 行：解析情感标签
 - 文件名格式：`03-01-01-01-01-01-01.wav`
 - `f.split("-")[2]`：取第 3 段 `"01"`（情感编码，1-8）
 - `int(...) - 1`：转为整数 0-7（PyTorch 要求标签从 0 开始）
@@ -339,7 +334,7 @@ def make_loaders(batch_size=32, seed=42):
     random.Random(seed).shuffle(pairs)               # 固定种子 42 → 每次运行划分一致
 ```
 
-#### 第 87 行：固定种子打乱
+#### 第 86 行：固定种子打乱
 - `random.Random(42)`：创建一个种子为 42 的独立随机数生成器
 - `.shuffle(pairs)`：原地打乱列表顺序
 - **为什么固定种子**：保证每次运行的划分完全一致，训练结果可复现
@@ -352,7 +347,7 @@ def make_loaders(batch_size=32, seed=42):
     test_ds = RavdessDataset(pairs[cut:])            # 后 20% 测试
 ```
 
-#### 第 88-90 行：80/20 划分
+#### 第 87-89 行：80/20 划分
 - `cut = int(1440 * 0.8) = 1152`
 - `pairs[:1152]`：前 1152 条 → 训练集
 - `pairs[1152:]`：后 288 条 → 测试集
@@ -365,14 +360,14 @@ def make_loaders(batch_size=32, seed=42):
     return train_loader, test_loader
 ```
 
-#### 第 91-93 行：创建 DataLoader
+#### 第 90-92 行：创建 DataLoader
 - `DataLoader` 自动将数据打包成批次（每批 32 条）
 - 训练集 `shuffle=True`：每轮开始前打乱顺序
 - 测试集不打乱：保证评估的确定性
 
 ---
 
-### 2.6 验收测试（已被注释，第 41-69、95-104、138-143 行）
+### 2.6 验收测试（已被注释，第 40-68、94-103、104-110 行）
 
 ```python
 # if __name__ == "__main__":
@@ -388,9 +383,9 @@ def make_loaders(batch_size=32, seed=42):
 
 | 位置 | 原本测什么 |
 |---|---|
-| 第 41-69 行 | 随机抽一条语音 → 跑 wav_to_logmel → 存频谱图 `fig_mel_sample.png` |
-| 第 95-104 行 | 取一个 batch，验证 `[32, 1, 64, 128]` / `[32]` / int64 / 1152 / 288 |
-| 第 138-143 行 | 实例化 SpeechCNN，打印总参数量、验证输出 `[2, 8]` |
+| 第 40-68 行 | 随机抽一条语音 → 跑 wav_to_logmel → 存频谱图 `fig_mel_sample.png` |
+| 第 94-103 行 | 取一个 batch，验证 `[32, 1, 64, 128]` / `[32]` / int64 / 1152 / 288 |
+| 第 104-110 行 | 从 model.py 导入 SpeechCNN，打印总参数量、验证输出 `[2, 8]` |
 
 **所以现在直接运行本文件不会打印任何东西**——这是正常的（不是 bug）。想跑验收测试，把对应的 `#` 去掉即可。
 
@@ -401,41 +396,12 @@ def make_loaders(batch_size=32, seed=42):
 
 ---
 
-### 2.7 `SpeechCNN` 模型类（第 105-136 行）
+### 2.7 关于 `SpeechCNN`：已搬走，本文件不再有模型定义
 
-```python
-class SpeechCNN(nn.Module):
-    def __init__(self, n_classes=8):
-        super().__init__()
-        ...
-    def forward(self, x):
-        ...
-```
+`SpeechCNN` 模型类**已整体搬到 `src/model.py`**（职责分离：dataset.py 只管数据，model.py 只管模型）。本文件**不再包含**任何模型定义，也**不再需要** `import torch.nn as nn`。
 
-#### 结构总览：三个卷积块 + 一个分类头
-
-```
-输入 [N, 1, 64, 128]                     （N=batch 大小）
-  block1: Conv(1→16) + ReLU + MaxPool   → [N, 16, 32, 64]
-  block2: Conv(16→32) + ReLU + MaxPool  → [N, 32, 16, 32]
-  block3: Conv(32→64) + ReLU + MaxPool  → [N, 64, 8, 16]
-  classifier: Flatten + Linear(8192→128) + ReLU + Linear(128→8) → logits [N, 8]
-```
-
-#### 关键行解释
-
-- **第 107 行 `super().__init__()`**：先初始化父类 `nn.Module`（PyTorch 要求，不写会报错）
-- **`nn.Sequential(...)`**：把多层按顺序串成一个"块"，调用块 = 依次过每层
-- **`nn.Conv2d(1, 16, kernel_size=3, padding=1)`**：2D 卷积，1 通道进 16 通道出，3×3 小窗口扫图；`padding=1` 让尺寸不变
-- **`nn.MaxPool2d(2)`**：2×2 取最大值压缩，高宽各减半——三连减半把 64×128 压成 8×16
-- **第 126 行 `nn.Flatten()`**：把 `[N, 64, 8, 16]` 摊平成 `[N, 8192]`（64×8×16=8192），卷积世界到全连接世界的"翻译官"
-- **第 127 行 `nn.Linear(8192, 128)`**：全连接层，参数量大头（8192×128 ≈ 105 万）
-- **第 129 行 `nn.Linear(128, 8)`**：输出 8 类 logits
-- **第 136 行 结尾不加 softmax**：`CrossEntropyLoss` 内部自带，加了反而会重复计算出错
-
-#### ⚠️ 注意：这是一份"重复定义"
-
-`train.py` 第 4 行实际导入的是 **`src/model.py` 里的 `SpeechCNN`**——本文件里这份是**内容相同的副本**，不会被训练用到。不影响运行，但属于冗余代码，知道即可（train.py 用的不是它）。
+- 模型的逐行详解见 **[model.py代码逐行详解.md](model.py代码逐行详解.md)**
+- 第 104-110 行的注释测试里保留了 `from model import SpeechCNN`——想测模型时去掉注释即可用
 
 #### 运行方式提醒
 
@@ -623,7 +589,7 @@ T 没变 → 频率分辨率没变。你只是扩展了**最高频率上限**（
 
 #### 最实际的约束：数据采样率是固定的
 
-RAVDESS 原始录音是 **48kHz**（代码第 14 行已用 `T.Resample` 统一降到 16kHz，见 Q7）。对已有文件"提高采样率"= 上采样，**不会凭空造出高频信息**（没新频率可加，只会内存翻倍、训练变慢）。所以只能在 `n_fft`/`hop_length` 上调整。
+RAVDESS 原始录音是 **48kHz**（代码第 13 行已用 `T.Resample` 统一降到 16kHz，见 Q7）。对已有文件"提高采样率"= 上采样，**不会凭空造出高频信息**（没新频率可加，只会内存翻倍、训练变慢）。所以只能在 `n_fft`/`hop_length` 上调整。
 
 **一句话**：频率更精细的方向对，但"同比例提高采样率和 n_fft"得不到它；且对语音也不是越大越好。当前 16kHz + 1024 已是工程上的合理配置。
 

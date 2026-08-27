@@ -45,3 +45,8 @@ for epoch in range(40):                                    # epoch: 30~60，看�
     history["train_acc"].append(train_acc)    # append = 往列表末尾追加一个数
     history["test_acc"].append(test_acc)
     print(f"epoch {epoch}  train_loss={avg_loss:.4f}  train_acc={train_acc:.4f}  test_acc={test_acc:.4f}")  # 每个 epoch 一行仪表盘
+# ============ 存盘：训练成果落袋为安（放画图之前——后面画图代码若有 bug 崩了，模型也不丢）============
+torch.save(net.state_dict(), "speech_cnn.pth")
+# save = 存盘 / state_dict = 107 万个参数值打包成的字典 / .pth = PyTorch 模型文件习惯后缀
+# 相对路径 → 从 ~/cnn-speech 运行时落在项目根目录（与 data/、src/ 同级），约 4 MB
+print("saved: speech_cnn.pth")    # 终端确认；跑完可用 ls -lh speech_cnn.pth 核对大小

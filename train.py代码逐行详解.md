@@ -66,6 +66,7 @@ import matplotlib.pyplot as plt
 - **`matplotlib.use("Agg")` 的坑**：必须在 `import pyplot` **之前**调用！
   - 因为 pyplot 导入时会锁定后端，先锁了再改就晚了
 - `Agg` = 纯画图不出窗口的后端，WSL 没有图形界面，弹窗会报错；Agg 只存文件
+- ⚠️ **当前版本画图代码还没写**（Step 6 待补），所以 `plt` 暂时**导入了但没用**——IDE 会提示 "plt imported but unused"，这是正常的，不是 bug。补上画图代码后提示自动消失
 
 ---
 
@@ -167,7 +168,7 @@ def evaluate(net, loader):
 
 ---
 
-## 四、训练主循环（第 30-47 行）
+## 四、训练主循环（第 30-47 行）+ 存盘（第 48-52 行）
 
 ### 4.1 外层：epoch 循环
 
@@ -243,6 +244,31 @@ for epoch in range(40):                                    # epoch: 30~60，看�
 - `f"..."`：f-string 格式化字符串，`{avg_loss:.4f}` = 保留 4 位小数
 - print 那行 = 每 epoch 一行仪表盘，盯着它就知道训练是否在进步
 
+### 4.4 训练结束：存盘（第 48-52 行）
+
+```python
+# ============ 存盘：训练成果落袋为安（放画图之前——后面画图代码若有 bug 崩了，模型也不丢）============
+torch.save(net.state_dict(), "speech_cnn.pth")
+# save = 存盘 / state_dict = 107 万个参数值打包成的字典 / .pth = PyTorch 模型文件习惯后缀
+# 相对路径 → 从 ~/cnn-speech 运行时落在项目根目录（与 data/、src/ 同级），约 4 MB
+print("saved: speech_cnn.pth")    # 终端确认；跑完可用 ls -lh speech_cnn.pth 核对大小
+```
+
+#### 第 49 行：`torch.save(net.state_dict(), "speech_cnn.pth")`（关键行）
+- **`net.state_dict()`**：把模型全部参数值（约 107 万个数）打包成一个**字典**——key 是层的名字，value 是该层的权重张量
+  - 只存**参数值**，不存模型结构——所以加载时需要先建好同样的 `SpeechCNN()` 再灌进去
+- **`torch.save`**：把字典序列化写入磁盘文件
+- **`.pth`**：PyTorch 模型文件的惯用后缀（无强制要求，但全社区都这么写）
+- **相对路径的坑**：`"speech_cnn.pth"` 落在**当前工作目录**——从根目录运行就落在项目根目录；从别处运行会存到别处（和 `data/` 的相对路径问题同理）
+
+#### 第 52 行：print 确认
+- 终端打一行确认，防止"以为存了其实没存"
+- 训练完可核对：`ls -lh speech_cnn.pth`，预期约 4 MB（107 万参数 × 4 字节）
+
+#### 为什么要"先存盘、后画图"
+- 注释里写了设计意图：**存盘放在画图代码之前**——后面 Step 6 画图若报 bug 崩溃，训练了 40 轮的模型已经落袋为安，不用重训
+- 顺序思想：**昂贵成果先持久化，易错步骤放后面**
+
 ---
 
 ## 五、训练五步曲总结（必须背下来）
@@ -281,6 +307,9 @@ x[32,1,64,128] ──GPU──▶ SpeechCNN ──▶ logits[32,8]
 evaluate(train_loader) → train_acc ─┐
 evaluate(test_loader)  → test_acc ──┼──▶ history 字典 ──▶ (Step 6 画曲线)
 avg_loss             ──────────────┘
+    │
+    ▼ 40 epoch 全部结束后:
+torch.save(net.state_dict(), "speech_cnn.pth")   ──▶ 模型存盘（~4 MB，落袋为安）
 ```
 
 ---
@@ -360,6 +389,27 @@ history 是 Step 6（画收敛曲线）的**唯一数据源**：
 
 所以训练时一个数都不能漏记。
 
+### Q8：存盘存的是什么？以后怎么加载回来用？
+
+**存的是参数，不是模型**。`state_dict()` 是一个字典：
+
+```
+{"block1.0.weight": 张量, "block1.0.bias": 张量, ..., "classifier.3.weight": 张量, ...}
+```
+
+key 是层的名字，value 是该层学到的权重值——约 107 万个数，序列化成 ~4 MB 文件。
+
+以后加载（如写 predict.py 推理时）是**两步走**：
+
+```python
+net = SpeechCNN()                          # ① 先建好同样结构的空模型
+net.load_state_dict(torch.load("speech_cnn.pth"))  # ② 把存的参数灌进去
+```
+
+因为只存了参数值、没存结构，所以 ① 不可省——文件里不知道"这些数该摆成什么形状的模型"。
+
+**顺带的工程价值**：下次想调 epoch 数或换学习率重训前，可以先加载这份参数接着练，不用从零开始。
+
 ---
 
 ## 八、运行方式与预期输出
@@ -371,13 +421,13 @@ cd ~/cnn-speech
 python src/train.py
 ```
 
-**为什么必须在根目录**：dataset.py 第 85 行的 `glob.glob("data/**/*.wav")` 是**相对当前工作目录**的路径——
+**为什么必须在根目录**：dataset.py 第 84 行的 `glob.glob("data/**/*.wav")` 是**相对当前工作目录**的路径——
 - 在根目录跑 → 找到 `data/`，1440 个文件正常加载
 - 在 `src/` 里跑 → `src/data/` 不存在 → files 为空 → **训练空转不报错**（更隐蔽的坑）
 
 import 不用担心：Python 会把脚本所在目录 `src/` 自动加进搜索路径，所以从根目录跑 `python src/train.py` 时 `from model import ...` 照样成功。
 
-预期输出（每 epoch 一行）：
+预期输出（每 epoch 一行，最后存盘确认）：
 
 ```
 device: cuda
@@ -385,12 +435,14 @@ epoch 0  train_loss=2.0134  train_acc=0.2543  test_acc=0.2396
 epoch 1  train_loss=1.7221  train_acc=0.3312  test_acc=0.2986
 ...
 epoch 39  train_loss=0.1102  train_acc=0.9626  test_acc=0.5833
+saved: speech_cnn.pth
 ```
 
 **看什么**：
 - `train_loss` 应一路下降
 - `test_acc` 先升后可能平台/回落（过拟合信号）
 - 最终报告用 `test_acc`（Step 7 的数字）
+- 最后一行 `saved:` 出现 = 模型已存到项目根目录，用 `ls -lh speech_cnn.pth` 核对（~4 MB）
 
 ---
 
@@ -412,3 +464,5 @@ epoch 39  train_loss=0.1102  train_acc=0.9626  test_acc=0.5833
 | 过拟合 | Overfitting | train_acc 高、test_acc 低：模型在死记硬背 |
 | f-string | Formatted String | `f"{x:.4f}"` 格式化字符串语法 |
 | 三元表达式 | Ternary | `A if cond else B` 一行分支写法 |
+| state_dict | State Dict | 模型所有参数打包成的字典（key=层名，value=权重），存盘/加载的标准格式 |
+| checkpoint | Checkpoint | 训练存档：模型参数（+可选优化器状态），可恢复训练或推理 |
