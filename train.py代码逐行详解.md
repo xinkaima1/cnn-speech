@@ -48,9 +48,10 @@ import matplotlib.pyplot as plt      # Step 6 画收敛曲线用
 - `as nn` 是社区约定俗成的别名，全世界的 PyTorch 代码都这么写
 
 #### 第 4 行：`from model import SpeechCNN`
-- **项目内部导入**！`model.py` 是你自己写的文件（Step 4 的 CNN 结构）
-- 注意：`from model import ...`（不带路径）能成功的前提是 train.py 和 model.py **在同一目录**（都在 `src/` 下），运行时要在 `src/` 目录里执行 `python train.py`
-- 如果报 `ModuleNotFoundError: No module named 'model'`，说明运行目录不对
+- **项目内部导入**！`model.py` 是你自己写的文件（Step 4 的 CNN 结构），和 train.py 同在 `src/` 下
+- **导入原理**：Python 运行脚本时会把**脚本所在目录**（`src/`）自动加入搜索路径，所以 `from model import ...` 天然能找到同目录的 model.py
+- ⚠️ 注意：这跟"你当前在哪个目录"无关——**从项目根目录跑 `python src/train.py` 照样能导入成功**
+- 如果报 `ModuleNotFoundError: No module named 'model'`，说明 model.py 被移动/改名了
 
 #### 第 5 行：`from dataset import make_loaders`
 - 同样是项目内部导入，拿 Step 3 封装的数据划分函数
@@ -363,12 +364,18 @@ history 是 Step 6（画收敛曲线）的**唯一数据源**：
 
 ## 八、运行方式与预期输出
 
-在 `src/` 目录下运行（因为 `from model import ...` 要求同目录）：
+**必须在项目根目录运行**（不是 `src/` 里！）：
 
 ```bash
-cd ~/cnn-speech/src
-python train.py
+cd ~/cnn-speech
+python src/train.py
 ```
+
+**为什么必须在根目录**：dataset.py 第 85 行的 `glob.glob("data/**/*.wav")` 是**相对当前工作目录**的路径——
+- 在根目录跑 → 找到 `data/`，1440 个文件正常加载
+- 在 `src/` 里跑 → `src/data/` 不存在 → files 为空 → **训练空转不报错**（更隐蔽的坑）
+
+import 不用担心：Python 会把脚本所在目录 `src/` 自动加进搜索路径，所以从根目录跑 `python src/train.py` 时 `from model import ...` 照样成功。
 
 预期输出（每 epoch 一行）：
 
