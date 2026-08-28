@@ -153,7 +153,7 @@
     <span>预计总工时：2–3 个全天</span>
   </div>
   <div class="callout orange" style="margin-top:14px"><span class="co-title">v1 基线版说明（先读这段）</span>
-  本文件是<strong>模块化拆分前版本的指导书</strong>（2026-08-26 实测跑通的流程）：三个 .py（dataset / model / train），训练 + 画图 + 终评集中在 train.py 一个文件里，Step 6 / 7 靠"往末尾追加"推进——与你 WSL 里现在的代码完全对应，按它收尾基线实验、补实验记录即可。模块化新版（plot.py / evaluate.py 独立拆分，另含 GAP 减参 + 交叉验证两个优化实验 Step 8–9）见同目录的 <strong>cnn-guide.html</strong>。<strong>注意</strong>：本版画图代码读的是内存里的 history 字典（不落盘），所以补做 Step 6 / 7 必须重跑一次 <code class="inline">python src/train.py</code>，8/27 那轮没存任何曲线数据、无法事后补画。</div>
+  本文件是<strong>模块化拆分前版本的指导书</strong>（2026-08-26 实测跑通的流程）：三个 .py（dataset / model / train），训练 + 画图 + 终评集中在 train.py 一个文件里，Step 6 / 7 靠"往末尾追加"推进。<strong>基线实验已按本版完成</strong>（2026-08-27，train.py 末尾追加 Step 6/7 后完整重跑 40 epoch，四件产出同源：speech_cnn.pth / loss.png / acc.png / fig_confusion.png），本手册全部实测数字（速记卡、Step 7 结果、6B 问答）已同步为该轮结果：<strong>train_acc 100% / test_acc 63.54% / 最终 train_loss 0.0002</strong>。模块化新版（plot.py / evaluate.py 独立拆分，另含 GAP 减参 + 交叉验证两个优化实验 Step 8–9）见同目录的 <strong>cnn-guide.html</strong>。</div>
 </header>
 
 <nav class="toc">
@@ -350,7 +350,7 @@ flowchart LR
   <div class="table-wrap"><table>
     <thead><tr><th>方法</th><th>阶段</th><th>RAVDESS 精度</th><th>你做不做</th></tr></thead>
     <tbody>
-      <tr><td>LeNet 风格 CNN（本作业）</td><td>②</td><td><strong>旧配置实测 46.2%</strong>（采样率 bug 版；修复重采样后预期更高，见 6B 节 Q12）。文献同类设置约 60–75%</td><td><strong>主线，必做</strong></td></tr>
+      <tr><td>LeNet 风格 CNN（本作业）</td><td>②</td><td><strong>实测 63.5%</strong>（2026-08-27 修复重采样后跑出；修复前 bug 版 46.2%，见 6B 节 Q12）。文献同类设置约 60–75%——已进入该区间</td><td><strong>主线，必做</strong></td></tr>
       <tr><td>wav2vec2 base 微调 / 线性探测</td><td>④</td><td>约 84%<sup><a href="#cite-4">[4]</a></sup></td><td>加分实验可选（模型约 360 MB，1 天）</td></tr>
       <tr><td>Transformer-CNN 融合（含可解释性设计）</td><td>⑤</td><td>91.3%<sup><a href="#cite-6">[6]</a></sup></td><td>✘ 超出作业范围，引文即可</td></tr>
       <tr><td>emotion2vec+（通用情感表征）</td><td>⑤</td><td class="dim">主战场在 IEMOCAP：仅训线性层即 SOTA<sup><a href="#cite-3">[3]</a></sup></td><td>加分实验可选（开源，GitHub/HuggingFace 可取）</td></tr>
@@ -982,7 +982,7 @@ melspec = T.MelSpectrogram(
       <strong>事实</strong>：RAVDESS 语音文件原生 <strong>48 kHz / 16-bit / 单声道 / 每条约 4 秒</strong>——读任何一条 wav 的文件头即可验证（文件第 25~28 字节按小端序读出来就是采样率；上面 Step 1 实测三条全是 48000）。本手册早先版本误写为"16 kHz"，是错的。<br><br>
       <strong>bug 本体</strong>：旧代码把 48k 波形直接喂给 <code class="inline">sample_rate=16000</code> 的 MelSpectrogram。这个参数<strong>只负责告诉 Mel 滤波器组"每个 bin 对应多少 Hz"，不会重采样音频</strong>。后果两条：① 频率刻度整体错位 3 倍（真实 3 kHz 的能量被记到 1 kHz 名下）；② hop=125 在 48k 波形上每秒产生 48000/125=<strong>384 帧</strong>而非设计的 128 帧 → 128 帧中心裁剪实际只保留 <strong>0.33 秒</strong>语音（原句约 4 秒）。铁证：一条 4.06 秒文件旧代码产出 4.06×384≈1559 帧，正是你 Step 2 验收时看到 [1, 64, 1346] 而非 [1, 64, 128] 的根源。<br><br>
       <strong>为什么修法是"降采样到 16k"而不是"把参数升到 48k 档"</strong>：语音能量几乎全在 8 kHz 以下（共振峰 F1~F4 在 300~4000 Hz），16 kHz 的奈奎斯特带宽刚好全覆盖；16 kHz 还是语音领域标准（wav2vec2 / HuBERT / emotion2vec 全按 16k 训练，以后做加分实验无缝衔接）。若留在 48k 档（n_fft=3072、hop=375 同比例放大）：计算量×3，且 Mel 轴上部约三分之一的频带浪费在 8~24 kHz 的近空频段上——纯亏。<br><br>
-      <strong>影响范围</strong>：本手册 6B 章那组实测数字（46.18% 等）全部来自<strong>修复前的旧配置</strong>（等效只喂 0.33 秒 + 频率错位）。你按修正版代码重跑，数字预期明显更高——以你的实测为准，把 6B 速记卡的六个数换成你自己的。<br><br>
+      <strong>影响范围</strong>：修复前的旧配置实测 46.18%（等效只喂 0.33 秒 + 频率错位）。2026-08-27 已按修正版代码完整重跑：test_acc <strong>63.54%</strong>（+17.4 个百分点），本手册各处数字均已同步为该轮实测——"发现 bug → 修复 → 精度 46.18% → 63.54%"这条因果链已是闭环的实测事实，不是预期。<br><br>
       <strong>制度性教训（已固化）</strong>：这个 bug 的根源不是手滑，是<strong>没给数字分身份</strong>——sample_rate=16000 被当成"惯例值随手写"，而它实际是管道一致性数字。第 1 章新增的"数字的三种身份"框（①数据事实要实测 / ②管道一致性要对账 / ③人为超参才可选）就是针对它的免疫机制，写任何数字前先归类。</div>
       <div class="callout"><span class="co-title">深挖：什么叫"按 16 kHz 解释"？——采样率是标签，不是数据（答辩被追问就讲这段）</span>
       <strong>核心认知①：wav 文件 = 一串振幅数字 + 文件头里的标签</strong>。文件里真正存的只有 [0.10, -0.31, 0.25, …] 这样一列数字；"这些数字每 1/48000 秒采一个"这条信息写在文件头（元数据，metadata）里——<strong>数字本身不携带任何时间信息</strong>。<br><br>
@@ -1238,11 +1238,11 @@ print(<span class="st">"saved: loss.png / acc.png"</span>)</pre>
   <div class="step">
     <div class="step-head"><span class="step-no">STEP 7</span><h4>续写 src/train.py（末尾再追加终评段）：有效性验证与混淆矩阵</h4><span class="eta">≈ 30 分钟</span></div>
     <div class="step-body">
-      <p>本步<strong>把终评代码再追加到 train.py 末尾</strong>（接在画图代码后面）——训练刚结束、模型还在显存里，直接在测试集上打分 + 出混淆矩阵（加分项，8×8 热图，看模型把谁认成谁——RAVDESS 上常见 happy↔surprised 混淆）。保存后再次运行 <code class="inline">python src/train.py</code>（训练 + 画图 + 终评一条龙，到此 train.py 全部写完）。"验证有效性"的最小充分论证 = <strong>与随机基线对比</strong>：</p>
+      <p>本步<strong>把终评代码再追加到 train.py 末尾</strong>（接在画图代码后面）——训练刚结束、模型还在显存里，直接在测试集上打分 + 出混淆矩阵（加分项，8×8 热图，看模型把谁认成谁——本轮实测混淆最重的是 fearful→happy 与 neutral→calm，见下方验收）。保存后再次运行 <code class="inline">python src/train.py</code>（训练 + 画图 + 终评一条龙，到此 train.py 全部写完）。"验证有效性"的最小充分论证 = <strong>与随机基线对比</strong>：</p>
       <ul>
         <li>随机猜测基线：1/8 = <strong>12.5%</strong>。</li>
-        <li>你的模型（随机划分、GPU、40 epoch，2026-08-26 已实测）：<strong>test accuracy = 46.18%</strong>（训练中峰值 50.69% @ epoch 27；train_acc 到 100%）。<strong>注意：该轮为采样率 bug 修复前的旧配置</strong>（48k 波形未重采样，等效只喂 0.33 秒 + 频率错位 3 倍，见 Step 2 修复框）——你按修正版代码重跑，预期明显更高，以你的实测为准，报告里"发现 bug → 修复 → 精度从 46.18% 到 Y%"就是现成的结果分析主线。</li>
-        <li>结论句式：「本模型测试准确率 46.18%，为随机基线（12.5%）的 3.7 倍，证明 CNN 能从频谱图中提取有效的情感判别特征；训练集 100% 与测试集 46% 的差距进一步暴露了小数据 + 固定裁剪下的过拟合边界。」</li>
+        <li>你的模型（随机划分、GPU、40 epoch，2026-08-27 按本版流程实测）：<strong>test accuracy = 63.54%</strong>（288 条测试集对 183 条；train_acc 100%，最终 train_loss 0.0002、test_loss 2.28）。对比采样率 bug 修复前的旧配置 46.18%：重采样一项修复直接带来 <strong>+17.4 个百分点</strong>——报告里"发现 bug → 修复 → 精度从 46.18% 到 63.54%"就是现成的结果分析主线。</li>
+        <li>结论句式：「本模型测试准确率 63.54%，为随机基线（12.5%）的 5.1 倍，证明 CNN 能从频谱图中提取有效的情感判别特征；训练集 100% 与测试集 63.5% 的差距（36 个点）暴露了小数据 + 固定裁剪下的过拟合边界。」</li>
       </ul>
       <pre class="code"><span class="cm"># ============ 以下追加到 train.py 末尾（Step 7：终评+混淆矩阵，接在画图代码后面）============</span>
 <span class="kw">from</span> sklearn.metrics <span class="kw">import</span> ConfusionMatrixDisplay   <span class="cm"># 混淆矩阵工具（8/26 已装好 sklearn）</span>
@@ -1259,7 +1259,7 @@ print(<span class="st">f"test accuracy = {acc:.4f}"</span>)                 <spa
 ConfusionMatrixDisplay.from_predictions(y_true, y_pred)
 plt.savefig(<span class="st">"fig_confusion.png"</span>, dpi=<span class="st">150</span>, bbox_inches=<span class="st">"tight"</span>)
 print(<span class="st">"saved: fig_confusion.png"</span>)</pre>
-      <div class="checkline"><b>验收</b>：终端打出 "test accuracy = X%" 一句话结论 + fig_confusion.png 生成；能口头回答"哪两类最容易混淆、为什么"（频谱特征相近的情感，如 happy 与 surprised 都是高唤醒度）。</div>
+      <div class="checkline"><b>验收</b>：终端打出 "test accuracy = 0.6354" 一句话结论 + fig_confusion.png 生成；能口头回答"哪两类最容易混淆、为什么"（本轮实测：fearful→happy 8 次、neutral→calm 6 次、sad→fearful / sad→disgust 各 5 次——高唤醒的 happy/fearful 互混、低唤醒的 neutral/calm/sad 互混，能量包络与音高特征相近所致；各类 recall：calm 0.81 / angry 0.78 / surprised 0.73 / disgust 0.70 / happy 0.57 / fearful 0.49 / neutral 0.50 / sad 0.44）。</div>
       <div class="callout blue"><span class="co-title">混淆矩阵怎么判读</span>
       主对角线（左上到右下）格子越亮越好；非对角的亮格子 = 混淆点。看一眼哪个最强 → 报告里就写"模型最常把 A 认成 B，因为……（从唤醒度/音色角度分析一句）"。准确率 &lt;50%：回查 5.1 节曲线形态 + 数据划分是否把测试集泄漏进了训练集；&gt;85%：大概率数据泄漏（同演员同时进训练和测试集，模型背音色作弊）——这不是好事，报告里要么注明划分方式、要么改按演员划分。</div>
     </div>
@@ -1323,8 +1323,8 @@ print(<span class="st">"saved: fig_confusion.png"</span>)</pre>
   <h3>5.2 报告里"有效性"的完整论证链</h3>
   <ol>
     <li><strong>基线</strong>：随机猜测 12.5%（8 类均匀猜）。</li>
-    <li><strong>结果</strong>：test accuracy = X%（附图 B 准确率曲线 + 混淆矩阵）。</li>
-    <li><strong>对比</strong>：X% ≫ 12.5%，且训练损失收敛（图 A）排除了"碰巧"。</li>
+    <li><strong>结果</strong>：test accuracy = 63.54%（288 条测试集对 183 条；附图 B 准确率曲线 + 混淆矩阵）。</li>
+    <li><strong>对比</strong>：63.54% ≫ 12.5%（5.1 倍），且训练损失收敛（图 A：≈2.0 → 0.0002）排除了"碰巧"。</li>
     <li><strong>归因</strong>（一句话，也是答辩收尾）：卷积核在频谱图上学到的局部时频模式（能量包络、共振峰转移）携带了情感判别信息——这正是课件 Abdel-Hamid 2014 将 CNN 引入语音的原始论点在情感维度的体现<sup><a href="#cite-1">[1]</a></sup>。</li>
   </ol>
 </section>
@@ -1350,23 +1350,23 @@ print(<span class="st">"saved: fig_confusion.png"</span>)</pre>
   <div class="qa"><div class="q"><span class="qn">Q8</span>和全连接 DNN 相比，CNN 在这个任务上的优势是什么？</div>
     <div class="a"><strong>一句话</strong>：① 参数效率（权值共享）；② 平移不变性（时间轴）；③ 局部性先验（时频模式是局部的，全连接强迫每个频率-时间点独立配权，既浪费又易过拟合）。Abdel-Hamid 2014 在 TIMIT 上的对照实验正是 CNN vs DNN 的同台比较<sup><a href="#cite-1">[1]</a></sup>。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q9</span>都 2026 年了，为什么还用 2014 年的 CNN？直接微调 wav2vec2 / emotion2vec 不香吗？</div>
-    <div class="a"><strong>一句话</strong>：作业要求"选择一种<strong>你能理解的</strong>模型并给出导数求解过程"——wav2vec2 是近亿参数的 Transformer，其梯度推导远超本课范围；能被完整手推反向传播的最强结构，就是 CNN。<strong>展开</strong>：① 科学方法论上，先建 baseline 再谈 SOTA，我的 46.2%（基线，3.7 倍于随机）正是 84%（wav2vec2）和 91%（融合模型）这些数字的对照组，没有基线的"好成绩"无从谈起；② 技术谱系上，2014 路线与 2024 前沿共享同一地基——Mel 频谱、卷积、softmax 交叉熵，wav2vec2 的第一层至今仍是一个卷积特征编码器，作业里推的卷积梯度在那里原样生效；③ 我清楚前沿在哪（见 1.3 节谱系表），并可选做预训练 embedding 的对比实验。能在报告里画出这条演进线，本身就是对文献的理解深度。</div></div>
+    <div class="a"><strong>一句话</strong>：作业要求"选择一种<strong>你能理解的</strong>模型并给出导数求解过程"——wav2vec2 是近亿参数的 Transformer，其梯度推导远超本课范围；能被完整手推反向传播的最强结构，就是 CNN。<strong>展开</strong>：① 科学方法论上，先建 baseline 再谈 SOTA，我的 63.5%（基线，5.1 倍于随机）正是 84%（wav2vec2）和 91%（融合模型）这些数字的对照组，没有基线的"好成绩"无从谈起；② 技术谱系上，2014 路线与 2024 前沿共享同一地基——Mel 频谱、卷积、softmax 交叉熵，wav2vec2 的第一层至今仍是一个卷积特征编码器，作业里推的卷积梯度在那里原样生效；③ 我清楚前沿在哪（见 1.3 节谱系表），并可选做预训练 embedding 的对比实验。能在报告里画出这条演进线，本身就是对文献的理解深度。</div></div>
 </section>
 
 <!-- ================= 6B 代码级答辩拷问 ================= -->
 <section id="s6b">
   <h2 class="chapter"><span class="chapter-no">SECTION 6B</span>代码级答辩拷问（老师指着你的代码问）</h2>
-  <p>第 6 章 9 题偏理论与推导；这一章全是"<strong>train.py / model.py / dataset.py 里每一行为什么这么写</strong>"。下方数字来自 <strong>2026-08-26 的一轮完整训练</strong>（40 epoch，RTX 4080）——注意：那轮跑的是<strong>采样率 bug 修复前的旧配置</strong>（48k 波形未重采样，见 Step 2 修复框）。你按修正版代码重跑后，各数字会不同（预期整体更好）：<strong>以你的实测为准，把下面速记卡的数换成你自己的</strong>，答题框架不变。每题一句话答案（背）+ 展开（理解）。只收关键点——工程细碎问题（import 放哪、变量名怎么起）不在答辩射程内，不背。</p>
-  <div class="callout"><span class="co-title">答辩数字速记卡（六个数必须脱口而出——最终以你重跑的实测为准）</span>
-  初始 loss <strong>1.98</strong>（理论值 ln 8 = 2.08）→ 最终 loss <strong>0.002</strong>；train_acc <strong>100%</strong>；test_acc <strong>46.18%</strong>（旧配置：训练中峰值 50.69% @ epoch 27；重采样修复后预期更高）；随机基线 <strong>12.5%</strong>（=1/8）；参数量 <strong>1,073,032</strong>。前两个数证收敛，中间两个数证有效 + 暴露过拟合，最后两个数是对照锚点。</div>
+  <p>第 6 章 9 题偏理论与推导；这一章全是"<strong>train.py / model.py / dataset.py 里每一行为什么这么写</strong>"。下方数字来自 <strong>2026-08-27 按本版流程跑通的一轮完整训练</strong>（40 epoch，RTX 4080，采样率修复后）——已是最终实测，直接背。每题一句话答案（背）+ 展开（理解）。只收关键点——工程细碎问题（import 放哪、变量名怎么起）不在答辩射程内，不背。</p>
+  <div class="callout"><span class="co-title">答辩数字速记卡（六个数必须脱口而出）</span>
+  初始 loss <strong>≈2.0</strong>（理论值 ln 8 = 2.079；终端 epoch 0 行的实测值在 1.9~2.0 一带）→ 最终 train_loss <strong>0.0002</strong>；train_acc <strong>100%</strong>；test_acc <strong>63.54%</strong>（= 随机基线的 5.1 倍；test_loss 2.28——远高于 train_loss，"自信地错"正是过拟合的数值签名）；随机基线 <strong>12.5%</strong>（=1/8）；参数量 <strong>1,073,032</strong>。前两个数证收敛，中间两个数证有效 + 暴露过拟合，最后两个数是对照锚点。</div>
 
   <h3>第一组：训练循环五步（train.py 的心脏）</h3>
   <div class="qa"><div class="q"><span class="qn">Q1</span>optimizer.zero_grad() 为什么不能删？删了会怎样？</div>
-    <div class="a"><strong>一句话</strong>：PyTorch 的梯度是"累加"进参数的 .grad 而不是覆盖——不清零，本 batch 的梯度会混进之前所有 batch 的，更新方向错，loss 卡在 2.08 附近不降。<strong>展开</strong>：五步顺序 = 擦黑板（zero_grad）→ 算梯度（backward）→ 用梯度更新（step）。累加式设计本是为"梯度累积"（显存不够时攒几批再一起更新）服务的；本作业每个 batch 独立更新，所以必须先清。实测 loss 从 1.98 一路降到 0.002，正是五步顺序正确的直接证据。</div></div>
+    <div class="a"><strong>一句话</strong>：PyTorch 的梯度是"累加"进参数的 .grad 而不是覆盖——不清零，本 batch 的梯度会混进之前所有 batch 的，更新方向错，loss 卡在 2.08 附近不降。<strong>展开</strong>：五步顺序 = 擦黑板（zero_grad）→ 算梯度（backward）→ 用梯度更新（step）。累加式设计本是为"梯度累积"（显存不够时攒几批再一起更新）服务的；本作业每个 batch 独立更新，所以必须先清。实测 loss 从 ≈2.0 一路降到 0.0002，正是五步顺序正确的直接证据。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q2</span>loss.backward() 和 optimizer.step() 分别对应你第 3 章推导的哪一步？</div>
     <div class="a"><strong>一句话</strong>：backward() = 式 (3)–(9) 的全部链式求导（把每个参数的 ∂L/∂θ 算好填进 .grad）；step() = 式 (10) 的更新规则 θ ← θ − η·∇L。<strong>展开</strong>：这是"推导↔代码"对照表里最重要的一行——手推的每个公式，PyTorch 在 backward() 一行里批量执行。答辩金句："我第 3 章推导的，就是 backward() 这一行在做的事。"</div></div>
-  <div class="qa"><div class="q"><span class="qn">Q3</span>为什么第 0 个 epoch 的 loss ≈ 2.08？实测 1.9791，比理论低一点，有问题吗？</div>
-    <div class="a"><strong>一句话</strong>：随机初始化的网络对 8 类输出近似均匀分布（各 ≈ 1/8），交叉熵 = −ln(1/8) = ln 8 = 2.079；实测 1.98 略低是因为初始化后输出已轻微偏斜，完全正常。<strong>展开</strong>：这个数不是巧合是必然——它同时验证了三件事：标签接对了、softmax 正常、loss 公式没错。报告加分句："初始 loss ≈ ln 8 = 2.08，与理论值吻合，验证了实现正确性。"</div></div>
+  <div class="qa"><div class="q"><span class="qn">Q3</span>为什么第 0 个 epoch 的 loss ≈ 2.08？实测比理论低一点，有问题吗？</div>
+    <div class="a"><strong>一句话</strong>：随机初始化的网络对 8 类输出近似均匀分布（各 ≈ 1/8），交叉熵 = −ln(1/8) = ln 8 = 2.079；实测略低（本轮终端 epoch 0 行在 1.9~2.0 一带，上一轮实测 1.9791）是因为初始化后输出已轻微偏斜，完全正常。<strong>展开</strong>：这个数不是巧合是必然——它同时验证了三件事：标签接对了、softmax 正常、loss 公式没错。报告加分句："初始 loss ≈ ln 8 = 2.08，与理论值吻合，验证了实现正确性。"</div></div>
   <div class="qa"><div class="q"><span class="qn">Q4</span>epoch 和 batch 什么关系？为什么打印的是"平均"loss？</div>
     <div class="a"><strong>一句话</strong>：epoch = 全部 1152 条训练数据完整过一遍；batch = 每次前向+反向用 32 条；一个 epoch = 36 个 batch（1152÷32）。avg_loss 是这 36 个批损失的平均。<strong>展开</strong>：只看最后一个 batch 会忽高忽低（那批可能恰好全是难样本），平均后每轮一个点、曲线才可画。batch_size 的直觉：大 → 梯度稳但显存紧；小 → 快但噪声大；32 是保守默认。</div></div>
 
@@ -1387,14 +1387,14 @@ print(<span class="st">"saved: fig_confusion.png"</span>)</pre>
   <h3>第四组：评估与实测结果（用你自己的数字回答）</h3>
   <div class="qa"><div class="q"><span class="qn">Q10</span>net.eval() 和 torch.no_grad() 各干什么？为什么评估要两个都加？</div>
     <div class="a"><strong>一句话</strong>：eval() 把层切到推理行为（本模型的 ReLU/MaxPool 无状态不受影响，但 Dropout 会关、BatchNorm 会改用统计量——习惯必须养）；no_grad() 让 PyTorch 不建计算图，省显存、约提速一倍。<strong>展开</strong>：两者管的维度不同——一个管"层怎么算"，一个管"要不要梯度"。忘了 no_grad 不报错只是慢；忘了 eval 在含 Dropout 的网络里每次评估结果都不同，更隐蔽。</div></div>
-  <div class="qa"><div class="q"><span class="qn">Q11</span>train_acc 100% vs test_acc 46.18%，差 54 个点，是失败吗？</div>
-    <div class="a"><strong>一句话</strong>：过拟合——模型把训练集连同每个说话人的音色细节全"背"下来了，泛化到没见过的人只剩 46%。对这份作业不是失败：46.18% = 随机基线的 3.7 倍（方法有效），而"观察到过拟合 + 解释成因 + 给出改进"本身就是报告"结果分析"一节的完整科学叙事。<strong>展开</strong>：早停点位看实测曲线：test_acc 峰值 50.69% 出现在 epoch 27，此后不再上升——追求最好单点结果就该停在那附近。</div></div>
+  <div class="qa"><div class="q"><span class="qn">Q11</span>train_acc 100% vs test_acc 63.54%，差 36 个点，是失败吗？</div>
+    <div class="a"><strong>一句话</strong>：过拟合——模型把训练集连同每个说话人的音色细节全"背"下来了，泛化到没见过的人只剩 63.5%。对这份作业不是失败：63.54% = 随机基线的 5.1 倍（方法有效），而"观察到过拟合 + 解释成因 + 给出改进"本身就是报告"结果分析"一节的完整科学叙事。<strong>展开</strong>：数值签名看两个 loss——train_loss 0.0002 vs test_loss 2.28，相差四个数量级：模型在测试集上"自信地错"（错误预测的 softmax 概率依然很高），CE 惩罚正是罚这种自信。早停点位看 acc.png 实测曲线：test_acc 升到 60% 一带后趋稳、不再系统性上升——追求最好单点结果就该停在趋稳段，还能省下白跑的十几个 epoch。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q12</span>为什么旧版只有 46.18%，不是文献常见的 60–75%？修了采样率 bug 后能到多少？</div>
-    <div class="a"><strong>一句话</strong>：46.18% 是<strong>采样率 bug 版</strong>的实测——RAVDESS 原生 48 kHz 被当 16 kHz 处理，频率刻度错位 3 倍 + 128 帧实际只含 0.33 秒语音（原句约 4 秒）；修复（T.Resample 降到 16k）后频率对齐、128 帧真正等于 1 秒，这个瓶颈直接消除，剩余差距来自固定 1 秒裁剪与无数据增强。<strong>展开</strong>：这是报告里最有力的一段叙事——"复盘发现输出帧数远超预期 → 读 wav 文件头确认 48 kHz → 定位到 sample_rate 参数只定刻度、不重采样音频 → 加 T.Resample 修复 → 精度从 46.18% 到 Y%"。答辩被问"精度怎么不高"时，能讲出这条完整因果链，比无脑跑高分更显功力——工程里这叫 root cause analysis（根因分析）。有余力再做一版 target_frames=256（Linear 输入同步 8192→16384）喂 2 秒的对比实验。</div></div>
+    <div class="a"><strong>一句话</strong>：46.18% 是<strong>采样率 bug 版</strong>的实测——RAVDESS 原生 48 kHz 被当 16 kHz 处理，频率刻度错位 3 倍 + 128 帧实际只含 0.33 秒语音（原句约 4 秒）；修复（T.Resample 降到 16k）后频率对齐、128 帧真正等于 1 秒。<strong>已实测验证：2026-08-27 重跑 test_acc = 63.54%，+17.4 个百分点</strong>，从"低于文献区间下限"直接进入文献常见区间 60–75%——瓶颈确实是它。剩余与文献上沿的差距来自固定 1 秒裁剪与无数据增强。<strong>展开</strong>：这是报告里最有力的一段叙事——"复盘发现输出帧数远超预期 → 读 wav 文件头确认 48 kHz → 定位到 sample_rate 参数只定刻度、不重采样音频 → 加 T.Resample 修复 → 精度从 46.18% 到 63.54%"。答辩被问"精度怎么不高"时，能讲出这条完整因果链，比无脑跑高分更显功力——工程里这叫 root cause analysis（根因分析）。有余力再做一版 target_frames=256（Linear 输入同步 8192→16384）喂 2 秒的对比实验。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q13</span>两张收敛曲线分别证明什么？合起来是什么？</div>
-    <div class="a"><strong>一句话</strong>：loss.png（1.98→0.002，陡降后趋平）证明优化收敛、排除"碰巧"；acc.png（train 升至 100%、test 升至 46% 后趋稳）证明学到的特征有泛化价值。两图合起来 = 任务书第 (3) 问"验证有效性"的完整证据链。<strong>展开</strong>：判读口诀——loss 降而 acc 不升 = 在背训练集；acc 升而 loss 不降 = 疑似数据泄漏（查划分）；双双健康 = 本作业实际形态（有效学习 + 过拟合边界清晰）。</div></div>
+    <div class="a"><strong>一句话</strong>：loss.png（≈2.0→0.0002，陡降后趋平）证明优化收敛、排除"碰巧"；acc.png（train 升至 100%、test 升至 63.5% 后趋稳）证明学到的特征有泛化价值。两图合起来 = 任务书第 (3) 问"验证有效性"的完整证据链。<strong>展开</strong>：判读口诀——loss 降而 acc 不升 = 在背训练集；acc 升而 loss 不降 = 疑似数据泄漏（查划分）；双双健康 = 本作业实际形态（有效学习 + 过拟合边界清晰）。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q14</span>混淆矩阵怎么读？看什么？</div>
-    <div class="a"><strong>一句话</strong>：8×8 方格，第 i 行第 j 列 = 真实类别 i 被预测成 j 的条数；主对角线越亮越好，非对角亮格 = 混淆点。<strong>展开</strong>：RAVDESS 上典型混淆是 happy↔surprised（同属高唤醒度，音高与能量特征相近）。报告结论句："模型错误集中在声学特征相近的类别，而非随机出错——说明卷积核学到的是有判别力的时频模式。"这句话直接呼应 Abdel-Hamid 2014 将 CNN 引入语音的原始论点<sup><a href="#cite-1">[1]</a></sup>。</div></div>
+    <div class="a"><strong>一句话</strong>：8×8 方格，第 i 行第 j 列 = 真实类别 i 被预测成 j 的条数；主对角线越亮越好，非对角亮格 = 混淆点。<strong>展开</strong>：本轮实测最重的混淆是 fearful→happy（8 次）、neutral→calm（6 次）、sad→fearful / sad→disgust（各 5 次）——规律是<strong>唤醒度相近的类互混</strong>：高唤醒的 happy/fearful/angry 一团、低唤醒的 neutral/calm/sad 一团，能量包络与音高特征相近所致；文献常提的 happy↔surprised 在本轮反而不重（surprised recall 0.73 偏高）。报告结论句："模型错误集中在声学特征相近的类别，而非随机出错——说明卷积核学到的是有判别力的时频模式。"这句话直接呼应 Abdel-Hamid 2014 将 CNN 引入语音的原始论点<sup><a href="#cite-1">[1]</a></sup>。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q15</span>n_fft=1024、n_mels=64 这些超参数怎么定的？怎么证明取值合适？</div>
     <div class="a"><strong>一句话</strong>：它们不是算出来的最优解，是"物理夹出的安全区 + 社区惯例 + 区间内曲线平坦"三重依据；要证据就做消融实验（ablation：固定其余变量，只动一个，对比结果）。<strong>展开</strong>——夹逼论证：① <strong>下界</strong>（窗必须够长）：男声基频约 100 Hz（周期 10ms），相邻谐波间隔即 F0，要分辨它们需 Δf = sr/n_fft ≤ 100 Hz → n_fft ≥ 160 采样点 ≈ 10ms；再看稳态频谱至少要 2~3 个完整周期 → 实际 ≥ 20~30ms；② <strong>上界</strong>（窗必须够短）：音素时长 50~200ms，窗长超过 ~100ms 会把相邻音素的频谱糊在一起；③ 夹逼结果：窗长安全区 20~100ms，1024/16000 = 64ms 落在正中，且 1024 是 2 的幂（FFT 算得快）；④ <strong>为什么不必纠结精确值</strong>：社区惯例五花八门——Kaldi 语音识别默认 25ms、librosa 默认 128ms、语音情感文献常见 40ms，各自都能工作——说明这条曲线在安全区内<strong>平坦</strong>（不敏感），"够好"比"最优"更关键；⑤ <strong>想要硬证据</strong>：只改 n_fft ∈ {512, 1024, 2048}（窗长 32/64/128ms）各跑一轮——hop 不变则输出仍是 [1,64,128]，model.py 一字不动，纯单变量实验——三行 test_acc 就是报告里的消融表。超参数分三级：<strong>物理推导的</strong>（采样率 16k，奈奎斯特）、<strong>惯例平坦的</strong>（n_fft / n_mels，不值得花时间调）、<strong>必须实测的</strong>（lr / epoch，曲线陡，调了真涨分）——把力气花在陡的那一级。</div></div>
   <div class="qa"><div class="q"><span class="qn">Q16</span>双声道怎么"取平均"变单声道？声道（channel）到底是什么？</div>
