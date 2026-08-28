@@ -1,10 +1,10 @@
-# train.py 代码逐行详解
+# train.py 代码逐行详解（对应 src/train.py，共 82 行）
 
 ---
 
 ## 零、这个文件在做什么（先看全景）
 
-`train.py` 是整个项目的**总指挥**：把前面各步骤的成果组装起来，完成"训练 → 评估 → 记录"的完整闭环。
+`train.py` 是整个项目的**总指挥**：把前面各步骤的成果组装起来，完成"训练 → 评估 → 记录 → 存盘 → 画图 → 终评"的完整闭环。
 
 ```
 dataset.py 的 make_loaders()  ──提供数据──▶
@@ -12,7 +12,10 @@ model.py 的 SpeechCNN         ──提供模型──▶   train.py（本文�
                                           │
                                           ├── 训练 40 轮（epoch）
                                           ├── 每轮算训练损失 + 训练/测试正确率
-                                          └── 记进 history 字典（Step 6 画图用）
+                                          ├── 记进 history 字典
+                                          ├── 存盘 speech_cnn.pth（第 49 行）
+                                          ├── Step 6：画 loss.png / acc.png（第 53-67 行）
+                                          └── Step 7：终评 test accuracy + 混淆矩阵（第 68-82 行）
 ```
 
 五个核心角色（深度学习万能五件套）：
@@ -66,7 +69,7 @@ import matplotlib.pyplot as plt
 - **`matplotlib.use("Agg")` 的坑**：必须在 `import pyplot` **之前**调用！
   - 因为 pyplot 导入时会锁定后端，先锁了再改就晚了
 - `Agg` = 纯画图不出窗口的后端，WSL 没有图形界面，弹窗会报错；Agg 只存文件
-- ⚠️ **当前版本画图代码还没写**（Step 6 待补），所以 `plt` 暂时**导入了但没用**——IDE 会提示 "plt imported but unused"，这是正常的，不是 bug。补上画图代码后提示自动消失
+- `plt` 在第 54-67 行（Step 6 画图）和第 80-81 行（Step 7 混淆矩阵）都有使用
 
 ---
 
@@ -271,7 +274,123 @@ print("saved: speech_cnn.pth")    # 终端确认；跑完可用 ls -lh speech_cn
 
 ---
 
-## 五、训练五步曲总结（必须背下来）
+## 五、Step 6：画收敛曲线（第 53-67 行）
+
+```python
+# ============ 以下追加到 train.py 末尾（Step 6：收敛曲线，接在 torch.save 之后）============
+plt.figure(figsize=(7, 4))                 # 新开一张画布（7×4 英寸）
+plt.plot(history["train_loss"])            # 每 epoch 一个点（x 轴自动为 0,1,2,…）
+plt.xlabel("Epoch"); plt.ylabel("Cross-Entropy Loss")
+plt.title("Training Loss Convergence")
+plt.savefig("loss.png", dpi=150, bbox_inches="tight")
+
+plt.figure(figsize=(7, 4))                 # 再开一张新画布，两张图互不干扰
+plt.plot(history["train_acc"], label="train acc")
+plt.plot(history["test_acc"], label="test acc")
+plt.xlabel("Epoch"); plt.ylabel("Accuracy")
+plt.title("Accuracy Convergence")
+plt.legend()                               # 图例：把 label 显示出来
+plt.savefig("acc.png", dpi=150, bbox_inches="tight")
+print("saved: loss.png / acc.png")
+```
+
+### 5.1 第 54-58 行：损失收敛曲线
+
+#### 第 54 行：`plt.figure(figsize=(7, 4))`
+- 新开一张画布，`figsize=(7, 4)` = 画布 7×4 英寸
+- **为什么连开两张**：`figure` 之间相互独立——若不新开，后面的 plot 会叠到同一张图上（loss 和 acc 混画一张就乱了）
+
+#### 第 55 行：`plt.plot(history["train_loss"])`
+- 只传了一个列表 → y 值用列表里的 40 个数，**x 轴自动取 0,1,2,…,39**（正好是 epoch 编号）
+- 这就是第 16 行 `history` 字典存在的意义：训练时收集的 40 个点，现在成了曲线上的 40 个坐标
+
+#### 第 56-57 行：标签和标题
+- `plt.xlabel / ylabel / title`：x 轴标签、y 轴标签、图标题
+- 用英文不是习惯问题——和 dataset.py 存频谱图同理，matplotlib 默认字体 DejaVu **没有汉字字形**，中文会画成方块 □
+
+#### 第 58 行：`plt.savefig("loss.png", dpi=150, bbox_inches="tight")`
+- Agg 后端下 `savefig` 是唯一的"出图"方式（`plt.show()` 弹窗在 WSL 会报错）
+- `dpi=150`：每英寸 150 像素，比默认 100 更清晰
+- `bbox_inches="tight"`：自动裁掉四周空白，图更紧凑
+- 相对路径 → 落在**当前工作目录**（同 `speech_cnn.pth` 的坑：必须在项目根目录运行）
+
+### 5.2 第 60-67 行：正确率双曲线（看图判断过拟合）
+
+#### 第 61-62 行：两条曲线画进同一张图
+- `plt.plot(history["train_acc"], label="train acc")`：`label` 只是给这条线**起名字**，配合第 65 行 `plt.legend()` 才会在图上显示图例
+- **train acc 和 test acc 必须画在同一张图里**——它们之间的"张口"就是过拟合信号，分开画就看不出来了
+
+#### 第 65 行：`plt.legend()`
+- 图例框：把每条线的 label 显示出来，否则分不清哪条是哪条
+
+#### 看图说话（Step 6 的目的）
+- `loss.png` 应一路下降 → 模型在学
+- `acc.png` 里 test acc 若先升后跌、和 train acc 张口越来越大 → 过拟合，epoch 该减
+- 两条 acc 线贴得近、一起涨 → 健康
+
+---
+
+## 六、Step 7：终评 + 混淆矩阵（第 68-82 行）
+
+```python
+# ============ 以下追加到 train.py 末尾（Step 7：终评+混淆矩阵，接在画图代码后面）============
+from sklearn.metrics import ConfusionMatrixDisplay   # 混淆矩阵工具（8/26 已装好 sklearn）
+net.eval()                                          # 评估模式
+y_true, y_pred = [], []                             # 边跑边收，混淆矩阵要用
+with torch.no_grad():                               # 不建计算图，省显存提速
+    for x, y in test_loader:
+        x, y = x.to(device), y.to(device)
+        pred = net(x).argmax(dim=1)                 # 每行最大值下标 = 预测类别
+        y_true += y.cpu().tolist()                  # 转普通列表（sklearn 不认 GPU 张量）
+        y_pred += pred.cpu().tolist()
+acc = sum(t == p for t, p in zip(y_true, y_pred)) / len(y_true)
+print(f"test accuracy = {acc:.4f}")                 # 随机基线 0.125——应为它的数倍
+ConfusionMatrixDisplay.from_predictions(y_true, y_pred)
+plt.savefig("fig_confusion.png", dpi=150, bbox_inches="tight")
+print("saved: fig_confusion.png")
+```
+
+#### 第 69 行：`from sklearn.metrics import ConfusionMatrixDisplay`
+- **sklearn**（scikit-learn）：经典机器学习库，这里只借用它的**混淆矩阵**工具
+- 混淆矩阵工具 PyTorch 里没有现成的，sklearn 是最顺手的第三方来源
+
+#### 第 70-72 行：评估准备
+- `net.eval()`：切评估模式（本模型没有 Dropout/BatchNorm，实际不影响结果，但**习惯必须养**——换个大模型忘写就出错）
+- `y_true, y_pred = [], []`：两个空列表——**真标签**和**预测标签**各收一份，混淆矩阵要按"真实 vs 预测"统计
+- `torch.no_grad()`：和 evaluate 函数同理，不算梯度省显存
+
+#### 第 73-77 行：收集全部测试样本的预测
+- 结构和 `evaluate()` 函数几乎一样，区别是：**evaluate 只数对错，这里逐条存下来**
+- `net(x).argmax(dim=1)`：取每行最大值下标 = 预测类别（同 evaluate）
+- `y.cpu().tolist()`：**两步转换**——`.cpu()` 把 GPU 张量搬回 CPU（sklearn 不认 GPU 张量），`.tolist()` 转成普通 Python 列表
+- `y_true += y...`：列表拼接累加，循环结束得到 288 个真标签和 288 个预测
+
+#### 第 78-79 行：手算总正确率
+- `sum(t == p for t, p in zip(y_true, y_pred))`：zip 把真/预测配对，逐对比较相等计 1，加起来 = 答对数
+- 这个数字应和第 43 行最后一次 `test_acc` **完全一致**（同一份模型、同一份测试集）——一致本身就是一次自检
+- **随机基线 0.125**：8 类瞎猜 = 1/8 = 0.125。真实效果应是它的数倍（比如 0.4~0.6）才说明模型学到了东西
+
+#### 第 80-82 行：画混淆矩阵
+- `ConfusionMatrixDisplay.from_predictions(y_true, y_pred)`：**一行画出 8×8 矩阵**——行 = 真实类别，列 = 预测类别，格子里的数 = 落在这对的样本数
+- 对角线 = 答对的（真实=预测）；**对角线外越亮 = 该对情感越容易混**
+- `plt.savefig("fig_confusion.png")`：注意这里**不用再 `plt.figure()`**——`from_predictions` 自己开了新图
+- 典型易混对（RAVDESS 的老毛病）：happy↔angry（都是高唤醒度）、neutral↔calm
+
+#### 混淆矩阵怎么看（示例 8×8）
+```
+            预测 →
+        neut calm hap  sad ...
+真实 ↓
+neut    [ 25   3   0   0  ...]   ← neutral 25 条对，3 条被认成 calm
+calm    [  4  26   1   1  ...]
+...
+对角线加起来 ÷ 288 = test accuracy
+```
+模型报告里"哪些情感容易混"的分析，全部从这张图读出来。
+
+---
+
+## 七、训练五步曲总结（必须背下来）
 
 ```
 ① logits = net(x)           前向：算得分
@@ -285,7 +404,7 @@ print("saved: speech_cnn.pth")    # 终端确认；跑完可用 ls -lh speech_cn
 
 ---
 
-## 六、数据流全图
+## 八、数据流全图
 
 ```
 train_loader (1152 条, 36 个 batch)
@@ -305,16 +424,25 @@ x[32,1,64,128] ──GPU──▶ SpeechCNN ──▶ logits[32,8]
     │
     ▼ 每 epoch 结束:
 evaluate(train_loader) → train_acc ─┐
-evaluate(test_loader)  → test_acc ──┼──▶ history 字典 ──▶ (Step 6 画曲线)
+evaluate(test_loader)  → test_acc ──┼──▶ history 字典
 avg_loss             ──────────────┘
     │
     ▼ 40 epoch 全部结束后:
 torch.save(net.state_dict(), "speech_cnn.pth")   ──▶ 模型存盘（~4 MB，落袋为安）
+    │
+    ▼ Step 6（第 53-67 行）:
+history["train_loss"]             ──▶ loss.png（损失收敛曲线）
+history["train_acc"+"test_acc"]   ──▶ acc.png（正确率双曲线，看过拟合）
+    │
+    ▼ Step 7（第 68-82 行）:
+test_loader 逐条预测 ──▶ y_true[288] + y_pred[288]
+    ├──▶ test accuracy（最终成绩单，随机基线 0.125）
+    └──▶ ConfusionMatrixDisplay ──▶ fig_confusion.png（8×8 混淆矩阵）
 ```
 
 ---
 
-## 七、常见问题 Q&A
+## 九、常见问题 Q&A
 
 ### Q1：为什么 `zero_grad()` 在 `backward()` 之前？不写会怎样？
 
@@ -381,10 +509,10 @@ else:
 
 ### Q7：history 记这些数干什么用？
 
-history 是 Step 6（画收敛曲线）的**唯一数据源**：
+history 是 Step 6（第 53-67 行画收敛曲线）的**唯一数据源**：
 
-- `train_loss` 曲线：看**是否在学**（应持续下降）
-- `train_acc` vs `test_acc` 两条曲线放一起：看**是否过拟合**（两线张口就是）
+- `train_loss` 曲线 → `loss.png`：看**是否在学**（应持续下降）
+- `train_acc` vs `test_acc` 两条曲线 → `acc.png`：看**是否过拟合**（两线张口就是）
 - 决定 `epoch=40` 是否合理、要不要早停，全靠看图说话
 
 所以训练时一个数都不能漏记。
@@ -410,9 +538,40 @@ net.load_state_dict(torch.load("speech_cnn.pth"))  # ② 把存的参数灌进�
 
 **顺带的工程价值**：下次想调 epoch 数或换学习率重训前，可以先加载这份参数接着练，不用从零开始。
 
+### Q9：Step 7 的 test accuracy 和每 epoch 打印的 test_acc 是一回事吗？
+
+**数值上应该完全一样**（同一份模型、同一份 test_loader、同样的 argmax 规则）。第 78 行手算的意义不在出新数字，而在：
+
+- **自检**：两次独立算路径得到同一答案 = 流程没 bug
+- **收集 y_true/y_pred**：正确率只是副产品，真正的产出是给混淆矩阵喂的 288 对标签
+- **报告口径**：最终报告/论文里写的 test accuracy 用这一行，出处清晰
+
+### Q10：`y.cpu().tolist()` 为什么要先 `.cpu()`？直接 `.tolist()` 不行吗？
+
+在 **CPU 张量**上直接 `.tolist()` 没问题；但 `y` 刚被 `.to(device)` 搬到了 GPU：
+- sklearn 的函数只认普通 Python 列表 / NumPy 数组，**不认任何 PyTorch 张量**（更不认 GPU 上的）
+- 所以链条是：GPU 张量 →（.cpu()）→ CPU 张量 →（.tolist()）→ Python 列表
+
+少 `.cpu()` 这步会报 `TypeError: can't convert cuda:0 device type tensor to numpy`（或类似）。
+
+### Q11：为什么画混淆矩阵不用再 `plt.figure()`？
+
+第 54、60 行自己 `figure` 是因为 `plt.plot` 只往"当前画布"上画；而 `ConfusionMatrixDisplay.from_predictions(...)` 是**自带画布的高层接口**——它内部自己开图、自己画格子。再 `figure` 反而会得到一张空图。
+
+### Q12：训练全部跑完，项目根目录该有哪些产出文件？
+
+| 文件 | 来源 | 内容 |
+|---|---|---|
+| `speech_cnn.pth` | 第 49 行 | 模型参数（~4 MB），以后推理/续训用 |
+| `loss.png` | 第 58 行 | 损失收敛曲线 |
+| `acc.png` | 第 66 行 | train/test 正确率双曲线 |
+| `fig_confusion.png` | 第 81 行 | 8×8 混淆矩阵 |
+
+用 `ls -lh *.png speech_cnn.pth` 一次核对。缺哪个 = 对应代码段没跑到。
+
 ---
 
-## 八、运行方式与预期输出
+## 十、运行方式与预期输出
 
 **必须在项目根目录运行**（不是 `src/` 里！）：
 
@@ -427,7 +586,7 @@ python src/train.py
 
 import 不用担心：Python 会把脚本所在目录 `src/` 自动加进搜索路径，所以从根目录跑 `python src/train.py` 时 `from model import ...` 照样成功。
 
-预期输出（每 epoch 一行，最后存盘确认）：
+预期输出（每 epoch 一行，最后存盘 + 画图 + 终评确认）：
 
 ```
 device: cuda
@@ -436,17 +595,20 @@ epoch 1  train_loss=1.7221  train_acc=0.3312  test_acc=0.2986
 ...
 epoch 39  train_loss=0.1102  train_acc=0.9626  test_acc=0.5833
 saved: speech_cnn.pth
+saved: loss.png / acc.png
+test accuracy = 0.5833
+saved: fig_confusion.png
 ```
 
 **看什么**：
 - `train_loss` 应一路下降
 - `test_acc` 先升后可能平台/回落（过拟合信号）
-- 最终报告用 `test_acc`（Step 7 的数字）
-- 最后一行 `saved:` 出现 = 模型已存到项目根目录，用 `ls -lh speech_cnn.pth` 核对（~4 MB）
+- 最终报告用 `test accuracy`（Step 7 的数字，应与最后一个 epoch 的 test_acc 一致；随机基线 0.125）
+- 后三行 `saved:` / `test accuracy` 出现 = 模型、两张曲线图、混淆矩阵全部落袋，用 `ls -lh *.png speech_cnn.pth` 核对（模型 ~4 MB）
 
 ---
 
-## 九、关键术语表
+## 十一、关键术语表
 
 | 术语 | 英文 | 解释 |
 |---|---|---|
@@ -466,3 +628,8 @@ saved: speech_cnn.pth
 | 三元表达式 | Ternary | `A if cond else B` 一行分支写法 |
 | state_dict | State Dict | 模型所有参数打包成的字典（key=层名，value=权重），存盘/加载的标准格式 |
 | checkpoint | Checkpoint | 训练存档：模型参数（+可选优化器状态），可恢复训练或推理 |
+| 混淆矩阵 | Confusion Matrix | 行=真实类别、列=预测类别的计数表，对角线=答对，格外的数=谁和谁混 |
+| 混淆矩阵显示 | ConfusionMatrixDisplay | sklearn 的现成画混淆矩阵工具，from_predictions 一行出图 |
+| 随机基线 | Random Baseline | 瞎猜的正确率（8 类 = 0.125），模型成绩的最低参照线 |
+| 图例 | Legend | 图上的小框，标明每条曲线是谁（label 参数的功劳） |
+| 分辨率 | dpi | dots per inch，画图的清晰度参数，150 比默认 100 更清楚 |

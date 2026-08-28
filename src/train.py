@@ -50,3 +50,33 @@ torch.save(net.state_dict(), "speech_cnn.pth")
 # save = 存盘 / state_dict = 107 万个参数值打包成的字典 / .pth = PyTorch 模型文件习惯后缀
 # 相对路径 → 从 ~/cnn-speech 运行时落在项目根目录（与 data/、src/ 同级），约 4 MB
 print("saved: speech_cnn.pth")    # 终端确认；跑完可用 ls -lh speech_cnn.pth 核对大小
+# ============ 以下追加到 train.py 末尾（Step 6：收敛曲线，接在 torch.save 之后）============
+plt.figure(figsize=(7, 4))                 # 新开一张画布（7×4 英寸）
+plt.plot(history["train_loss"])            # 每 epoch 一个点（x 轴自动为 0,1,2,…）
+plt.xlabel("Epoch"); plt.ylabel("Cross-Entropy Loss")
+plt.title("Training Loss Convergence")
+plt.savefig("loss.png", dpi=150, bbox_inches="tight")
+
+plt.figure(figsize=(7, 4))                 # 再开一张新画布，两张图互不干扰
+plt.plot(history["train_acc"], label="train acc")
+plt.plot(history["test_acc"], label="test acc")
+plt.xlabel("Epoch"); plt.ylabel("Accuracy")
+plt.title("Accuracy Convergence")
+plt.legend()                               # 图例：把 label 显示出来
+plt.savefig("acc.png", dpi=150, bbox_inches="tight")
+print("saved: loss.png / acc.png")
+# ============ 以下追加到 train.py 末尾（Step 7：终评+混淆矩阵，接在画图代码后面）============
+from sklearn.metrics import ConfusionMatrixDisplay   # 混淆矩阵工具（8/26 已装好 sklearn）
+net.eval()                                          # 评估模式
+y_true, y_pred = [], []                             # 边跑边收，混淆矩阵要用
+with torch.no_grad():                               # 不建计算图，省显存提速
+    for x, y in test_loader:
+        x, y = x.to(device), y.to(device)
+        pred = net(x).argmax(dim=1)                 # 每行最大值下标 = 预测类别
+        y_true += y.cpu().tolist()                  # 转普通列表（sklearn 不认 GPU 张量）
+        y_pred += pred.cpu().tolist()
+acc = sum(t == p for t, p in zip(y_true, y_pred)) / len(y_true)
+print(f"test accuracy = {acc:.4f}")                 # 随机基线 0.125——应为它的数倍
+ConfusionMatrixDisplay.from_predictions(y_true, y_pred)
+plt.savefig("fig_confusion.png", dpi=150, bbox_inches="tight")
+print("saved: fig_confusion.png")
